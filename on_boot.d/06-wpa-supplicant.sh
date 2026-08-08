@@ -24,7 +24,9 @@ IFACE=eth8
 DROPIN=/etc/systemd/system/wpa_supplicant.service.d
 changed=0
 
-log() { echo "10-wpa-supplicant: $*"; }
+# Derive the log prefix from the filename so it cannot drift out of sync with
+# the script's ordering prefix, as it did when this moved from 10- to 06-.
+log() { echo "$(basename "$0" .sh): $*"; }
 
 # --- 1. Package -------------------------------------------------------------
 # Order is explicit: libpcsclite1 is a dependency of wpasupplicant, and

@@ -8,9 +8,28 @@ set -euo pipefail
 
 HOST="${1:-udm}"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-AGE_KEY="${SOPS_AGE_KEY_FILE:-$HOME/.config/sops/age/router.txt}"
 
-[ -f "$AGE_KEY" ] || { echo "ERROR: age key not found at $AGE_KEY" >&2; exit 1; }
+# This repo has its own age identity, deliberately separate from any other.
+# Do NOT inherit an ambient SOPS_AGE_KEY_FILE: a global one set by the shell
+# profile points at a different identity and produces a confusing
+# "no identity matched any of the recipients" failure. Override with
+# UDM_AGE_KEY_FILE if the key genuinely lives elsewhere.
+AGE_KEY="${UDM_AGE_KEY_FILE:-$HOME/.config/sops/age/router.txt}"
+
+[ -f "$AGE_KEY" ] || {
+  echo "ERROR: age key not found at $AGE_KEY" >&2
+  echo "       Restore it from your password manager, or set UDM_AGE_KEY_FILE." >&2
+  exit 1
+}
+
+# Fail early and legibly if the key cannot open these files, rather than
+# midway through decryption.
+RECIPIENT="$(grep -o 'age1[a-z0-9]*' "$REPO/.sops.yaml" | head -1)"
+if ! grep -q "public key: ${RECIPIENT}" "$AGE_KEY"; then
+  echo "ERROR: $AGE_KEY does not hold the identity for $RECIPIENT" >&2
+  echo "       That key cannot decrypt secrets/ in this repo." >&2
+  exit 1
+fi
 export SOPS_AGE_KEY_FILE="$AGE_KEY"
 
 # Decrypt into a private temp dir that is removed on any exit path, including

@@ -6,8 +6,13 @@
 
 set -uo pipefail
 HOST="${1:-udm}"
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-ssh "$HOST" 'bash -s' <<'REMOTE' 2>&1 | grep -v "post-quantum\|store now\|openssh.com/pq"
+# Derive the expected boot scripts from the repo rather than hardcoding names.
+# Hardcoding drifted the moment 10-wpa-supplicant.sh was renamed to 06-.
+EXPECTED_SCRIPTS="$(cd "$REPO/on_boot.d" && ls -1 *.sh | tr '\n' ' ')"
+
+ssh "$HOST" "EXPECTED_SCRIPTS='$EXPECTED_SCRIPTS' bash -s" <<'REMOTE' 2>&1 | grep -v "post-quantum\|store now\|openssh.com/pq"
 fail=0
 ok()   { printf '  \033[32mOK  \033[0m %s\n' "$1"; }
 bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$1"; fail=1; }
@@ -39,8 +44,21 @@ if systemctl is-enabled --quiet unifi-on-boot 2>/dev/null; then
 else
   bad "unifi-on-boot NOT enabled — nothing will restore after an upgrade"
 fi
-for f in /data/on_boot.d/05-ssh-keys.sh /data/on_boot.d/10-wpa-supplicant.sh; do
+for s in ${EXPECTED_SCRIPTS:-}; do
+  f="/data/on_boot.d/$s"
   [ -x "$f" ] && ok "$f present and executable" || bad "$f missing or not executable"
+done
+
+# Surface stale scripts left behind by a rename. They would still execute.
+for f in /data/on_boot.d/*.sh; do
+  [ -e "$f" ] || continue
+  b=$(basename "$f")
+  case " ${EXPECTED_SCRIPTS:-} " in
+    *" $b "*) continue ;;
+    *) [ "$b" = "10-tailscaled.sh" ] \
+         && echo "  NOTE  $b is present but not managed by this repo" \
+         || echo "  WARN  $b is present but not in the repo — stale after a rename?" ;;
+  esac
 done
 
 echo "== /data payload =="
