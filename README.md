@@ -25,7 +25,7 @@ Now the box restores itself from `/data` on boot, and upgrades are hands-off.
 |---|---|
 | UniFi OS | 5.1.26 (`UDMPRO.al324.v5.1.26`) |
 | Network | 10.4.57 (bundled; 10.5.67 available and deliberately held) |
-| Protect | 6.2.88 |
+| Protect | 7.1.87 |
 | Debian base | 11 bullseye |
 | wpasupplicant | 2:2.9.0-21+deb11u3 |
 | unifi-on-boot | 1.1.3 |
@@ -180,9 +180,6 @@ Note the sample timestamp in that log line is 24h old — it evaluated against t
 pre-cleanup memory profile, when IPS was running at High and ~770 MB was free.
 Current headroom is far better, so a later evaluation cycle should succeed. IPS
 works normally on 6.0.12 in the meantime.
-
-**Protect is not offering 7.1.87** — it reads `Up to Date` at 6.2.88 on 5.1.26.
-Worth re-checking periodically.
 
 **`apt-get update` exits 100.** `bullseye-backports` in `/etc/apt/sources.list`
 was archived by Debian and 404s. It breaks apt generally but affects nothing

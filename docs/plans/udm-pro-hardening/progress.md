@@ -10,7 +10,7 @@
 | 4. unifi-on-boot | Complete | 2026-08-08 | 1.1.3, registered with `ubnt-dpkg-cache` |
 | 5. `/data` staging + boot scripts | Complete | 2026-08-08 | Idempotent; converged re-run leaves supplicant PID unchanged |
 | 6. Destructive validation | Complete | 2026-08-08 | Full wipe + reboot, self-healed, `CTRL-EVENT-EAP-SUCCESS` |
-| 7. Firmware upgrade | Complete | 2026-08-08 | 4.3.6 → 5.1.26; supplicant wiped and rebuilt unaided |
+| 7. Firmware upgrade | Complete | 2026-08-08 | 4.3.6 → 5.1.26; supplicant wiped and rebuilt unaided. Protect → 7.1.87 |
 | 8. Documentation | Complete | 2026-08-08 | README runbook, IPS restore checklist |
 
 ## What discovery changed
@@ -61,9 +61,14 @@ Everything is verified and documented. `scripts/verify.sh` is the single command
 that answers "is this still healthy" — 13 checks, exit 0 when good.
 
 Open items are tracked in the README: Suricata pending migration 6.0.12 → 8.0.6
-(blocked once on a stale memory sample, expected to clear on a later cycle),
-Protect not offering 7.1.87, and a pre-existing `bullseye-backports` 404 that
-breaks `apt update` but affects nothing here.
+(blocked once on a stale memory sample, expected to clear on a later cycle), and
+a pre-existing `bullseye-backports` 404 that breaks `apt update` but affects
+nothing here.
+
+Protect 7.1.87 landed later the same day — the catalogue had simply not
+refreshed when 5.1.26 first reported `Up to Date` at 6.2.88. WAN was unaffected
+by the application upgrade, as expected: it rebuilds the app, not the root
+filesystem.
 
 Next natural checkpoints: confirm the Suricata 8 migration completes, watch
 memory for two weeks, and revisit Network 10.5.x in 1–2 months.
