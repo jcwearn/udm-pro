@@ -66,6 +66,49 @@ critical path entirely.
 
 Re-enable after the upgrade is verified, then watch memory for two weeks.
 
+## Confirmed: the UI toggle destroys these settings
+
+Turning Intrusion Prevention off on 2026-08-08 did not merely set a disabled
+flag. It cleared the configuration from both places that held it:
+
+| | before | after |
+|---|---|---|
+| `udapi-net-cfg.json` mode | `pcap-l3-blocking-high` | `None` |
+| `udapi-net-cfg.json` interfaces | 6 | 0 |
+| `udapi-net-cfg.json` categories | 33 | 0 |
+| `udapi-net-cfg.json` suppressions | 2 | 0 |
+| mongo `ace.setting{key:"ips"}` | populated | `enabled_categories: []`, `ips_mode: disabled` |
+
+A scan of every collection in the `ace` database found no document referencing
+sid 2003068 afterwards. Re-enabling in the UI will **not** bring any of this
+back; it starts from defaults. This file and the pre-toggle `.unf` autobackup
+are the only records.
+
+## Restore checklist (after the OS upgrade)
+
+Settings → CyberSecure → Protection → Intrusion Prevention → **On**, then:
+
+1. **Detection Mode** → `Notify and Block` (this is `-blocking-` in the mode string)
+2. **Sensitivity** → `High` (the `-high` suffix; config `pcap-l3-blocking-high`)
+3. **Selected Networks** → all six: Default, IoT, Guest, Internet Facing,
+   Protect, Home Lab
+4. **Active Detections** → enable the 33 categories listed in the JSON snapshot.
+   Note one group was deliberately partial — the UI showed
+   "Peer to Peer and Dark Web: 2 of 3". Match the snapshot, not the defaults.
+5. **Suppression rules** → re-add both, sid `2003068`, gid `1`:
+   - track `source`, networks `<lan-ip-1>/32`, `<lan-ip-2>/32`, `<lan-ip-3>/32`
+   - track `destination`, same three networks
+6. Confirm afterwards:
+   ```bash
+   ssh udm 'python3 -c "import json;s=json.load(open(\"/data/udapi-config/udapi-net-cfg.json\"))[\"services\"][\"idsIps\"];print(s[\"mode\"],len(s[\"interfaces\"]),len(s[\"signatures\"]),len(s.get(\"suppress\",[])))"'
+   # expect: pcap-l3-blocking-high 6 33 2
+   ```
+
+The 33 categories: BOTCC, WORM, MALWARE, MOBILE_MALWARE, TOR, EXPLOIT,
+SHELLCODE, DOS, ATTACK_RESPONSE, SCAN, RPC, ACTIVEX, DNS, GAMES, SQL,
+USER_AGENTS, WEB_SPECIFIC_APPS, WEB_CLIENT, WEB_SERVER, CIARMY, COMPROMISED,
+DSHIELD, FTP, ICMP, IMAP, MISC, NETBIOS, POP3, SMTP, SNMP, TELNET, TFTP, VOIP.
+
 ## Checking state
 
 ```bash
