@@ -1,0 +1,188 @@
+{
+  "tor": true,
+  "alien": true,
+  "enabled": true,
+  "signatureScheduler": 24,
+  "interfaces": [
+    {
+      "id": "br0"
+    },
+    {
+      "id": "br2"
+    },
+    {
+      "id": "br100"
+    },
+    {
+      "id": "br20"
+    },
+    {
+      "id": "br40"
+    },
+    {
+      "id": "br10"
+    }
+  ],
+  "deviceID": "<redacted - device MAC>",
+  "token": "<redacted - device-specific signature subscription token>",
+  "blockTime": 300,
+  "mode": "pcap-l3-blocking-high",
+  "signatures": [
+    {
+      "category": "BOTCC",
+      "action": "block"
+    },
+    {
+      "category": "WORM",
+      "action": "block"
+    },
+    {
+      "category": "MALWARE",
+      "action": "block"
+    },
+    {
+      "category": "MOBILE_MALWARE",
+      "action": "block"
+    },
+    {
+      "category": "TOR",
+      "action": "block"
+    },
+    {
+      "category": "EXPLOIT",
+      "action": "block"
+    },
+    {
+      "category": "SHELLCODE",
+      "action": "block"
+    },
+    {
+      "category": "DOS",
+      "action": "block"
+    },
+    {
+      "category": "ATTACK_RESPONSE",
+      "action": "block"
+    },
+    {
+      "category": "SCAN",
+      "action": "block"
+    },
+    {
+      "category": "RPC",
+      "action": "block"
+    },
+    {
+      "category": "ACTIVEX",
+      "action": "block"
+    },
+    {
+      "category": "DNS",
+      "action": "block"
+    },
+    {
+      "category": "GAMES",
+      "action": "block"
+    },
+    {
+      "category": "SQL",
+      "action": "block"
+    },
+    {
+      "category": "USER_AGENTS",
+      "action": "block"
+    },
+    {
+      "category": "WEB_SPECIFIC_APPS",
+      "action": "block"
+    },
+    {
+      "category": "WEB_CLIENT",
+      "action": "block"
+    },
+    {
+      "category": "WEB_SERVER",
+      "action": "block"
+    },
+    {
+      "category": "CIARMY",
+      "action": "block"
+    },
+    {
+      "category": "COMPROMISED",
+      "action": "block"
+    },
+    {
+      "category": "DSHIELD",
+      "action": "block"
+    },
+    {
+      "category": "FTP",
+      "action": "block"
+    },
+    {
+      "category": "ICMP",
+      "action": "block"
+    },
+    {
+      "category": "IMAP",
+      "action": "block"
+    },
+    {
+      "category": "MISC",
+      "action": "block"
+    },
+    {
+      "category": "NETBIOS",
+      "action": "block"
+    },
+    {
+      "category": "POP3",
+      "action": "block"
+    },
+    {
+      "category": "SMTP",
+      "action": "block"
+    },
+    {
+      "category": "SNMP",
+      "action": "block"
+    },
+    {
+      "category": "TELNET",
+      "action": "block"
+    },
+    {
+      "category": "TFTP",
+      "action": "block"
+    },
+    {
+      "category": "VOIP",
+      "action": "block"
+    }
+  ],
+  "suppress": [
+    {
+      "id": 1,
+      "sid": 2003068,
+      "gid": 1,
+      "track": "source",
+      "netaddr": [
+        "<lan-ip-1>/32",
+        "<lan-ip-2>/32",
+        "<lan-ip-3>/32"
+      ]
+    },
+    {
+      "id": 2,
+      "sid": 2003068,
+      "gid": 1,
+      "track": "destination",
+      "netaddr": [
+        "<lan-ip-1>/32",
+        "<lan-ip-2>/32",
+        "<lan-ip-3>/32"
+      ]
+    }
+  ]
+}
