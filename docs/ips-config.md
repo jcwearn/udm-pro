@@ -18,7 +18,7 @@ reconstructed by hand if a toggle or an upgrade loses them.
 | Block time | 300s |
 | Signature refresh | every 24h |
 | Tor / alien blocking | both on |
-| Signature categories | 32, all set to `block` |
+| Signature categories | 33, all set to `block` |
 | Resident memory | ~651 MB (largest single consumer on the box) |
 
 ## The part that is easy to lose
@@ -34,6 +34,26 @@ These are hand-tuned exceptions. Everything else in the config is reachable
 from the UI in a few clicks; these are the entries worth checking explicitly
 after any Threat Management toggle or firmware upgrade, because losing them
 reintroduces whatever false positive they were added to silence.
+
+## What is NOT affected by the IPS toggle
+
+Region blocking is a **separate service**, `services.geoipFiltering`, not part
+of `services.idsIps`:
+
+```
+enabled: true, action: block, direction: incoming
+countryList: RU BY AM KZ KG CU CN
+interfaces: eth8, eth9        (WAN — note IPS runs on the six br* bridges)
+```
+
+It is enforced with ipset + iptables (`UBIOS*` hash:net sets), and there is no
+geoip reference anywhere in Suricata's yaml. Turning Intrusion Prevention off
+leaves country blocking fully in place. Worth writing down because both live
+under the same "CyberSecure → Protection" page in the UI, which makes them look
+like one feature.
+
+Also on that page but unrelated to IPS: Encrypted DNS, Honeypot,
+Identification (DPI), Content Filter, Traffic Logging.
 
 ## Why IPS is disabled during the OS upgrade
 
