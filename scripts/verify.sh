@@ -55,9 +55,7 @@ for f in /data/on_boot.d/*.sh; do
   b=$(basename "$f")
   case " ${EXPECTED_SCRIPTS:-} " in
     *" $b "*) continue ;;
-    *) [ "$b" = "10-tailscaled.sh" ] \
-         && echo "  NOTE  $b is present but not managed by this repo" \
-         || echo "  WARN  $b is present but not in the repo — stale after a rename?" ;;
+    *) echo "  WARN  $b is present but not in the repo — stale after a rename?" ;;
   esac
 done
 
