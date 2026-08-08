@@ -83,9 +83,19 @@ else
 fi
 
 # --- 5. Report --------------------------------------------------------------
-sleep 3
+# Poll rather than sleeping a fixed interval. EAP auth and the DHCP lease that
+# follows it do not complete instantly: a flat 3s check logged an empty address
+# on a real post-wipe boot even though WAN came up fine seconds later, which
+# reads like a failure in exactly the log you would be searching during one.
+addr=""
+for _ in $(seq 1 30); do
+  addr=$(ip -4 -o addr show "$IFACE" 2>/dev/null | awk '{print $4}' | head -1)
+  [ -n "$addr" ] && break
+  sleep 1
+done
+
 if systemctl is-active --quiet wpa_supplicant.service; then
-  log "service active; ${IFACE} addr: $(ip -4 -o addr show "$IFACE" 2>/dev/null | awk '{print $4}' | head -1)"
+  log "service active; ${IFACE} addr: ${addr:-<none yet>}"
 else
   log "ERROR: wpa_supplicant.service is not active — WAN will be down"
 fi
