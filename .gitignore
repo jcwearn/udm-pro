@@ -1,0 +1,20 @@
+# Never commit plaintext key material. Encrypted *.sops files are the only
+# form secrets take in this repo.
+*.pem
+*.key
+*.p12
+*.pfx
+id_*
+!*.pub
+
+# Decrypted working copies produced by scripts/deploy.sh
+*.decrypted
+/tmp-decrypt/
+
+# UniFi OS config backups contain site credentials and are NOT covered by
+# the secrets/ SOPS rule. Keep them out entirely.
+unifi-backup*
+*.unf
+*.unifi
+
+.DS_Store

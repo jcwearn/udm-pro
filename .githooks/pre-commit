@@ -1,0 +1,58 @@
+#!/bin/bash
+# Refuse to commit plaintext key material.
+#
+# .gitignore is the first line of defence but is trivially bypassed with
+# `git add -f`. This hook inspects actual staged content, so it catches a
+# plaintext PEM regardless of filename or ignore rules.
+#
+# Install with: git config core.hooksPath .githooks
+
+set -u
+
+fail=0
+
+# Patterns are assembled at runtime rather than written literally, otherwise
+# this file matches itself and blocks every commit.
+BEGIN='-----BEGIN'
+KEY_PAT="${BEGIN} .*PRIVATE KEY-----"
+CRT_PAT="${BEGIN} CERTIFICATE-----"
+
+# Encrypted SOPS output legitimately contains age recipient stanzas
+# (BEGIN AGE ENCRYPTED FILE); those must not trip the check.
+
+for f in $(git diff --cached --name-only --diff-filter=ACM); do
+  # Skip this hook itself and anything already encrypted.
+  case "$f" in
+    .githooks/*) continue ;;
+    *.sops) continue ;;
+  esac
+
+  added=$(git diff --cached -U0 -- "$f" | grep '^+' || true)
+
+  # `--` is mandatory: the patterns begin with a dash and grep would
+  # otherwise parse them as options and silently match nothing.
+  if printf '%s' "$added" | grep -q -- "$KEY_PAT"; then
+    echo "BLOCKED: $f contains a plaintext private key." >&2
+    echo "  Encrypt first: sops --encrypt --age \$AGE_PUB --input-type binary \\" >&2
+    echo "                      --output-type binary FILE > secrets/FILE.sops" >&2
+    fail=1
+  fi
+
+  if printf '%s' "$added" | grep -q -- "$CRT_PAT"; then
+    echo "BLOCKED: $f contains a plaintext certificate." >&2
+    echo "  Certificates belong in secrets/ as .sops files." >&2
+    fail=1
+  fi
+done
+
+# A .sops file that is not actually encrypted means sops failed silently
+# somewhere upstream. Catch it before it reaches the remote.
+for f in $(git diff --cached --name-only --diff-filter=ACM | grep '\.sops$' || true); do
+  [ -f "$f" ] || continue
+  if ! grep -q 'sops_version\|"sops"\|ENC\[' "$f"; then
+    echo "BLOCKED: $f has a .sops extension but is not encrypted." >&2
+    fail=1
+  fi
+done
+
+exit $fail
