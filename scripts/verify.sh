@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Health check for the 802.1X bypass and its restore mechanism.
+# Health check for the 802.1X bypass, its restore mechanism, and encrypted DNS.
 # Read-only. Run after deploy, after a reboot, and after a firmware upgrade.
 #
 # Usage:  scripts/verify.sh [ssh-host]     (default host: udm)
@@ -81,6 +81,34 @@ else
 fi
 dpkg-query -W -f='${Status}' libssl1.1 2>/dev/null | grep -q "install ok installed" \
   && ok "libssl1.1 present" || bad "libssl1.1 MISSING — wpasupplicant cannot install offline"
+
+echo "== encrypted DNS =="
+# The gateway will happily run the resolver while the controller has no record
+# of it. That is how this reverted once already: the config key and the listener
+# were both fine for two days, then the next reconcile deleted the service.
+# So assert on the controller's record first — it is the one that decides.
+doh=$(mongo --quiet --port 27117 ace --eval \
+  'var d=db.setting.findOne({key:"doh"});print(d ? d.state+" "+(d.custom_servers||[]).length : "missing 0")' 2>/dev/null)
+doh_state="${doh%% *}"
+doh_count="${doh##* }"
+if [ "$doh_state" = "on" ] && [ "${doh_count:-0}" -gt 0 ] 2>/dev/null; then
+  ok "doh committed in controller (state=on, $doh_count custom server(s))"
+else
+  bad "doh NOT committed in controller (${doh:-unreadable}) — next re-provision will delete it"
+fi
+
+if python3 -c 'import json,sys;sys.exit("dohProxy" not in json.load(open("/data/udapi-config/udapi-net-cfg.json"))["services"])' 2>/dev/null; then
+  ok "services.dohProxy present in gateway config"
+else
+  bad "services.dohProxy absent from gateway config"
+fi
+
+if ss -lnu 2>/dev/null | grep -q '127.0.0.1:5053'; then
+  ok "dnscrypt-proxy listening on 127.0.0.1:5053"
+else
+  bad "nothing listening on 127.0.0.1:5053 — encrypted DNS is not resolving"
+fi
+
 
 echo
 [ "$fail" -eq 0 ] && echo "ALL CHECKS PASSED" || echo "SOME CHECKS FAILED"
