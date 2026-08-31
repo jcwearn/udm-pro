@@ -73,7 +73,7 @@ paths to the full extraction-tool names.
 
 ```bash
 scripts/deploy.sh [host]    # decrypt secrets, stage /data, install boot scripts
-scripts/verify.sh [host]    # 13-point health check, exit 0 = all good
+scripts/verify.sh [host]    # 16-point health check, exit 0 = all good
 scripts/discover.sh         # read-only audit; run via ssh, see below
 ```
 
@@ -156,6 +156,8 @@ Bare UDM to working bypass, assuming `/data` is empty:
    bookworm. If UniFi OS ever rebases, refresh `packages/` **while the gateway
    is still reachable**, before trusting the cache.
 6. Re-enable IPS from the checklist and diff against the snapshot.
+7. Confirm Encrypted DNS is still committed — see [`docs/dns-config.md`](docs/dns-config.md).
+   `verify.sh` checks this, but it reverts on any re-provision, not only upgrades.
 
 ### Version policy
 
@@ -180,6 +182,14 @@ Note the sample timestamp in that log line is 24h old — it evaluated against t
 pre-cleanup memory profile, when IPS was running at High and ~770 MB was free.
 Current headroom is far better, so a later evaluation cycle should succeed. IPS
 works normally on 6.0.12 in the meantime.
+
+**Encrypted DNS reverts unless the controller commits it.** NextDNS over DoH
+was configured on 2026-08-18, ran for two days, and was deleted on 2026-08-20 by
+an ordinary config reconcile — no upgrade involved. The gateway had the resolver
+running while the controller's `doh` setting still read `state: off` with an
+empty `custom_servers`, so the reconcile was right to remove it. The stamp was
+never at fault. Because the resolver running proves nothing, `verify.sh` asserts
+on the controller's record; see [`docs/dns-config.md`](docs/dns-config.md).
 
 **`apt-get update` exits 100.** `bullseye-backports` in `/etc/apt/sources.list`
 was archived by Debian and 404s. It breaks apt generally but affects nothing

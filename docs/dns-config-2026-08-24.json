@@ -1,0 +1,30 @@
+{
+  "_source": {
+    "gateway": "/data/udapi-config/udapi-net-cfg-9a86317d1c31d005.json -> services.dohProxy, written 2026-08-18 17:00 (the last generation known to work)",
+    "controller": "mongo ace.setting {key: \"doh\"}, read 2026-08-24",
+    "_note": "These two disagreed. That disagreement is the failure documented in dns-config.md."
+  },
+
+  "gateway.services.dohProxy": {
+    "enabled": true,
+    "instances": [
+      {
+        "port": 5053,
+        "servers": [
+          {
+            "server": "NextDNS",
+            "sdnsStamp": "<redacted - encodes the NextDNS profile ID; decoded fields in dns-config.md>"
+          }
+        ]
+      }
+    ]
+  },
+
+  "controller.setting.doh": {
+    "key": "doh",
+    "state": "off",
+    "server_names": [],
+    "custom_servers": [],
+    "site_id": "<redacted - controller site id>"
+  }
+}
