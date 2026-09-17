@@ -12,6 +12,11 @@ for over a year, which in turn meant missing security fixes.
 
 Now the box restores itself from `/data` on boot, and upgrades are hands-off.
 
+This repo owns the OS layer: UniFi OS, the supplicant, the boot scripts, and
+the upgrade runbook. The Network application's configuration (networks,
+firewall, WLANs) is owned by [jcwearn/unifi-infra](https://github.com/jcwearn/unifi-infra)
+through the API.
+
 ## Verified
 
 | | Result |
@@ -23,9 +28,9 @@ Now the box restores itself from `/data` on boot, and upgrades are hands-off.
 
 | Component | Version |
 |---|---|
-| UniFi OS | 5.1.26 (`UDMPRO.al324.v5.1.26`) |
-| Network | 10.4.57 (bundled; 10.5.67 available and deliberately held) |
-| Protect | 7.1.87 |
+| UniFi OS | 5.1.33 (`UDMPRO.al324.v5.1.33.44ce47b.260909.0025`) |
+| Network | 10.6.106 |
+| Protect | 7.2.105 |
 | Debian base | 11 bullseye |
 | wpasupplicant | 2:2.9.0-21+deb11u3 |
 | unifi-on-boot | 1.1.3 |
@@ -161,12 +166,14 @@ Bare UDM to working bypass, assuming `/data` is empty:
 
 ### Version policy
 
-Stay one branch behind current, not many. Freezing is not free — it cost a year
-of security fixes last time.
+Do not freeze. Freezing is not free — it cost a year of security fixes last
+time.
 
-Network is held at the version UniFi OS bundles. When Ubiquiti will not ship
-their own newest branch as the default, take the hint. 10.5.67 is available and
-deliberately not installed; revisit in 1–2 months.
+Device firmware auto-updates daily at 3 AM. UniFi OS, Network and Protect
+application updates are applied by hand; auto-update is off for all three.
+Network has moved 10.4.57 → 10.5.67 → 10.6.101 → 10.6.106 between 2026-08-08
+and 2026-09-15, so "Current state" above reflects the box as last checked, not
+a pin.
 
 ## Known open items
 
