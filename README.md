@@ -254,8 +254,12 @@ ssh udm '/data/tailscale/bin/tailscale logout; systemctl disable --now tailscale
 
 then remove the machine in the admin console. The boot script stays installed
 and harmless: on the next boot it restores the unit, starts the daemon, sees
-`NeedsLogin`, prints the join command and exits 0. To remove it entirely, delete
-`on_boot.d/07-tailscale.sh` and `/data/tailscale/` and re-run `deploy.sh`.
+`NeedsLogin`, prints the join command and exits 0. To remove it entirely,
+revert the Tailscale change in this repo (the boot script, the unit, the
+tarball and its `SHA256SUMS` line, and the Tailscale blocks in `deploy.sh` and
+`verify.sh`), then delete `/data/on_boot.d/07-tailscale.sh` and
+`/data/tailscale/` on the box by hand — `deploy.sh` only adds boot scripts, it
+never removes one.
 
 ## Restore from scratch
 
