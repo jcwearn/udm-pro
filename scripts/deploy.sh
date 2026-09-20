@@ -86,13 +86,6 @@ printf '%s\n' "$tarball" | ssh "$HOST" 'keep=$(cat); find /data/tailscale -maxde
 scp -q "$REPO"/packages/SHA256SUMS "$HOST:/data/tailscale/SHA256SUMS"
 scp -q "$REPO"/systemd/tailscaled.service "$HOST:/data/tailscale/tailscaled.service"
 
-# The box once ran the community tailscale-udm package, which also used
-# /data/tailscale. Its manage.sh and tailscale-env are inert under this
-# layout, but say so rather than leave the captain wondering which one is live.
-ssh "$HOST" 'for f in /data/tailscale/manage.sh /data/tailscale/tailscale-env; do
-  [ -e "$f" ] && echo "    WARN  $f is a tailscale-udm leftover; 07-tailscale.sh does not use it"
-done; true'
-
 # Boot scripts
 scp -q "$REPO"/on_boot.d/*.sh "$HOST:/data/on_boot.d/"
 ssh "$HOST" 'chmod 755 /data/on_boot.d/*.sh'

@@ -4,10 +4,9 @@
 # Everything with a lifetime lives in /data/tailscale: the staged tarball, the
 # extracted binaries, the unit file, and — the part that matters — the node
 # identity in tailscaled.state. A UniFi OS upgrade wipes /etc, /usr and /var, so
-# what it costs is the unit file in /etc/systemd/system and the PATH symlink,
-# and both are put back here. The node key survives in /data, so the router
-# rejoins the tailnet on its own; no auth key is stored on the box or in the
-# repo.
+# what it costs is the unit file in /etc/systemd/system, and that is put back
+# here. The node key survives in /data, so the router rejoins the tailnet on
+# its own; no auth key is stored on the box or in the repo.
 #
 # The join itself is a one-time step done by hand (README, "Tailscale"). If the
 # node has never joined, or was logged out on purpose, this prints the exact
@@ -22,7 +21,6 @@ set -u
 
 DATA=/data/tailscale
 UNIT=/etc/systemd/system/tailscaled.service
-LINK=/usr/local/bin/tailscale
 TS="${DATA}/bin/tailscale"
 changed=0
 
@@ -32,10 +30,11 @@ log() { echo "$(basename "$0" .sh): $*"; }
 
 # --- 1. Binaries ------------------------------------------------------------
 # The pinned version is the staged tarball's filename; deploy.sh keeps exactly
-# one there and the hash is checked against the staged SHA256SUMS before
-# anything is extracted. Binaries are (re)installed only when missing or when
-# `tailscale version` disagrees with the tarball, so a deploy that stages a
-# newer tarball upgrades on the next boot (or the next unifi-on-boot restart).
+# one there and the tarball's own line in the staged SHA256SUMS is checked
+# before anything is extracted. Binaries are (re)installed only when missing
+# or when `tailscale version` disagrees with the tarball, so a deploy that
+# stages a newer tarball upgrades on the next boot (or the next unifi-on-boot
+# restart).
 set -- "${DATA}"/tailscale_*_arm64.tgz
 tarball=$1
 [ -f "$tarball" ] || { log "no tarball in ${DATA}, nothing to restore"; exit 0; }
@@ -46,7 +45,12 @@ want=${want%_arm64.tgz}
 have=$("$TS" version 2>/dev/null | head -1)
 if [ "$have" != "$want" ]; then
   log "tailscale ${have:-missing}, want ${want} — installing from $(basename "$tarball")"
-  if ! (cd "$DATA" && sha256sum -c --quiet --ignore-missing SHA256SUMS >/dev/null 2>&1); then
+  sum=$(grep " $(basename "$tarball")\$" "${DATA}/SHA256SUMS" 2>/dev/null)
+  if [ -z "$sum" ]; then
+    log "ERROR: $(basename "$tarball") has no entry in ${DATA}/SHA256SUMS — not installing"
+    exit 1
+  fi
+  if ! (cd "$DATA" && printf '%s\n' "$sum" | sha256sum -c --quiet --status); then
     log "ERROR: $(basename "$tarball") does not match ${DATA}/SHA256SUMS — not installing"
     exit 1
   fi
@@ -76,16 +80,7 @@ if [ ! -f "$UNIT" ] || ! cmp -s "${DATA}/tailscaled.service" "$UNIT"; then
   changed=1
 fi
 
-# --- 3. PATH symlink --------------------------------------------------------
-# So the one-time `tailscale up` and day-to-day `tailscale status` work without
-# the full path. /usr/local is wiped with the rest of the root filesystem.
-if [ "$(readlink "$LINK" 2>/dev/null)" != "$TS" ]; then
-  install -d -m 0755 "$(dirname "$LINK")"
-  ln -sfn "$TS" "$LINK"
-  log "linked ${LINK} -> ${TS}"
-fi
-
-# --- 4. Enable and start ----------------------------------------------------
+# --- 3. Enable and start ----------------------------------------------------
 if [ "$changed" -eq 1 ]; then
   # A new unit or new binaries: reload so systemd sees the file as written,
   # then restart rather than start in case the old binary is still running.
@@ -101,7 +96,7 @@ else
   }
 fi
 
-# --- 5. Report --------------------------------------------------------------
+# --- 4. Report --------------------------------------------------------------
 # Poll rather than sleep: the daemon needs a moment to open its socket, and a
 # node with a valid key needs a control-plane round trip before it reports
 # Running. Anything other than Running is printed as what to do about it.
@@ -127,7 +122,7 @@ case "$state" in
       log "not joined (BackendState=${state})"
     fi
     log "join once, by hand — this script never does it:"
-    log "  tailscale up --accept-dns=false --accept-routes=false --advertise-routes= --ssh=false --hostname=router"
+    log "  ${TS} up --accept-dns=false --accept-routes=false --advertise-routes= --ssh=false --hostname=router"
     log "  (append --auth-key=tskey-auth-... or follow the login URL it prints)"
     ;;
   NeedsMachineAuth)

@@ -46,7 +46,7 @@ overlay, a backup `.deb` in `/data/unifi-on-boot/`, and registration with
 |---|---|
 | `05-ssh-keys.sh` | `/root/.ssh/authorized_keys` from `/data/ssh/` |
 | `06-wpa-supplicant.sh` | package (offline `dpkg -i`), certs, conf, systemd drop-in, enable symlink |
-| `07-tailscale.sh` | binaries from the staged tarball (hash-checked), `tailscaled.service`, PATH symlink, enable + start; node identity already in `/data` |
+| `07-tailscale.sh` | binaries from the staged tarball (hash-checked), `tailscaled.service`, enable + start; node identity already in `/data` |
 
 SSH keys go first so a supplicant failure still leaves you able to log in and
 debug. Tailscale goes last: it needs WAN, WAN does not need it, and nothing
@@ -158,10 +158,10 @@ matters:
 | `tailscaled.service` | the unit, copied to `/etc/systemd/system` on every boot that finds it gone or different |
 | `tailscaled.state` | the node identity; written by `tailscaled`, never by this repo |
 
-After a UniFi OS upgrade the unit file and the `/usr/local/bin/tailscale`
-symlink are the only casualties; the boot script puts them back, `tailscaled`
-reads its key from `/data`, and the node rejoins on its own. **No auth key is
-stored on the box or in this repo.**
+After a UniFi OS upgrade the unit file is the only casualty; the boot script
+puts it back, `tailscaled` reads its key from `/data`, and the node rejoins on
+its own. **No auth key is stored on the box or in this repo.** The CLI is
+`/data/tailscale/bin/tailscale`; nothing is put on `PATH`.
 
 ### The one-time join
 
@@ -170,13 +170,17 @@ was logged out on purpose) it prints this and exits 0:
 
 ```bash
 ssh udm
-tailscale up --accept-dns=false --accept-routes=false --advertise-routes= --ssh=false --hostname=router
+/data/tailscale/bin/tailscale up --accept-dns=false --accept-routes=false --advertise-routes= --ssh=false --hostname=router
 ```
 
 Either append `--auth-key=tskey-auth-...` or follow the login URL it prints.
 Flags are not persisted between `tailscale up` runs, so if you ever re-run it,
 pass all of them again. Then `scripts/verify.sh` from the Mac, and
 `ssh router` from anywhere with Tailscale on.
+
+Then disable key expiry for `router` in the admin console (Machines → … →
+Disable key expiry); otherwise the node key lapses after 180 days, `tailscaled`
+drops to `NeedsLogin`, and the join has to be repeated.
 
 ### What Tailscale changes on the box, and what is not yet verified
 
@@ -189,10 +193,18 @@ Relied upon, from the 1.102.4 source:
 - With the default `--netfilter-mode=on` and `iptables` present, it creates
   chains `ts-input` and `ts-forward` in `filter` and `ts-postrouting` in
   `nat`, and inserts a jump to each at position 1 of `INPUT`, `FORWARD` and
-  `POSTROUTING`. `ts-input` accepts traffic arriving on `tailscale0`;
-  `ts-forward` marks and accepts forwarded traffic in and out of `tailscale0`;
-  nothing is forwarded because no routes are advertised or accepted.
-  UniFi's `UBIOS_*` chains stay below, untouched.
+  `POSTROUTING`. `ts-input` accepts traffic arriving on `tailscale0` and
+  `udp --dport 41641` on every interface, `eth8` included; `ts-forward` marks
+  and accepts forwarded traffic in and out of `tailscale0`; nothing is
+  forwarded because no routes are advertised or accepted. UniFi's `UBIOS_*`
+  chains stay below, untouched.
+- That `ts-input` rule is the one WAN-facing change the router gains: UDP
+  41641 is open inbound on WAN, ahead of UniFi's drop rules, which is what lets
+  peers connect direct instead of through DERP. Anything that is not a valid
+  WireGuard handshake from a tailnet peer is silently dropped by `tailscaled`;
+  nothing else listens there. Rollback is the [Rollback](#rollback) section:
+  `tailscale logout` plus disabling the unit, whose `--cleanup` removes the
+  chains.
 - Tailscale's WireGuard traffic leaves on `eth8`. IPS inspects only the six
   `br*` bridges, and the Peer-to-Peer category was already unchecked in the
   snapshot ("2 of 3"), which is what
@@ -212,11 +224,8 @@ Not verifiable until the first `deploy.sh` + `verify.sh` run on the box:
 - that the box's `fwmark` use does not collide with Tailscale's `0x80000` /
   `0x40000` in mask `0xff0000` (`verify.sh` prints whether the `ts-*` chains
   hooked in; `journalctl -u tailscaled` shows the netfilter mode it chose);
-- whether peers connect direct or through DERP. Nothing opens UDP 41641 inbound
-  on WAN; hole punching from the router's own outbound traffic usually suffices
-  because the UDM binds the public address directly. If `tailscale status`
-  shows `relay` for peers you care about, a WAN-in rule for UDP 41641 belongs in
-  [unifi-infra](https://github.com/jcwearn/unifi-infra), not here.
+- whether peers connect direct or through DERP (`tailscale status` shows
+  `direct` or `relay` per peer).
 
 ### Upgrading Tailscale
 
@@ -240,7 +249,7 @@ boot script reads the pinned version from the filename.
 ### Rollback
 
 ```bash
-ssh udm 'tailscale logout; systemctl disable --now tailscaled.service'
+ssh udm '/data/tailscale/bin/tailscale logout; systemctl disable --now tailscaled.service'
 ```
 
 then remove the machine in the admin console. The boot script stays installed
