@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Health check for the 802.1X bypass, its restore mechanism, and encrypted DNS.
+# Health check for the 802.1X bypass, its restore mechanism, encrypted DNS,
+# and Tailscale.
 # Read-only. Run after deploy, after a reboot, and after a firmware upgrade.
 #
 # Usage:  scripts/verify.sh [ssh-host]     (default host: udm)
@@ -12,7 +13,12 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Hardcoding drifted the moment 10-wpa-supplicant.sh was renamed to 06-.
 EXPECTED_SCRIPTS="$(cd "$REPO/on_boot.d" && ls -1 *.sh | tr '\n' ' ')"
 
-ssh "$HOST" "EXPECTED_SCRIPTS='$EXPECTED_SCRIPTS' bash -s" <<'REMOTE' 2>&1 | grep -v "post-quantum\|store now\|openssh.com/pq"
+# Likewise the pinned Tailscale version is whatever tarball packages/ holds.
+TS_VERSION="$(basename "$REPO"/packages/tailscale_*_arm64.tgz)"
+TS_VERSION="${TS_VERSION#tailscale_}"
+TS_VERSION="${TS_VERSION%_arm64.tgz}"
+
+ssh "$HOST" "EXPECTED_SCRIPTS='$EXPECTED_SCRIPTS' TS_VERSION='$TS_VERSION' bash -s" <<'REMOTE' 2>&1 | grep -v "post-quantum\|store now\|openssh.com/pq"
 fail=0
 ok()   { printf '  \033[32mOK  \033[0m %s\n' "$1"; }
 bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$1"; fail=1; }
@@ -109,6 +115,82 @@ else
   bad "nothing listening on 127.0.0.1:5053 — encrypted DNS is not resolving"
 fi
 
+echo "== tailscale =="
+TS=/data/tailscale/bin/tailscale
+have=$("$TS" version 2>/dev/null | head -1)
+if [ "$have" = "${TS_VERSION:-}" ]; then
+  ok "tailscale ${have} in /data/tailscale/bin (pinned)"
+else
+  bad "tailscale is ${have:-missing}, repo pins ${TS_VERSION:-?}"
+fi
+ls /data/tailscale/tailscale_*_arm64.tgz >/dev/null 2>&1 \
+  && ok "staged tarball present" || bad "staged tarball MISSING — a firmware rebuild cannot reinstall"
+[ -f /data/tailscale/tailscaled.service ] && ok "/data/tailscale/tailscaled.service" || bad "/data/tailscale/tailscaled.service missing"
+if systemctl is-enabled --quiet tailscaled.service 2>/dev/null; then
+  ok "tailscaled.service enabled"
+else
+  bad "tailscaled.service NOT enabled"
+fi
+if systemctl is-active --quiet tailscaled.service; then
+  ok "tailscaled.service active"
+else
+  bad "tailscaled.service NOT active"
+fi
+# The state file is the node identity. It is what makes a firmware rebuild
+# rejoin without a new auth key, and it lives here precisely so /etc can go.
+[ -f /data/tailscale/tailscaled.state ] && ok "node identity in /data/tailscale/tailscaled.state" \
+  || bad "no /data/tailscale/tailscaled.state — never joined, or state was moved"
+
+# Everything from here reads the daemon. Prefs come from `tailscale debug
+# prefs` (the local ipn.Prefs as JSON), status from `tailscale status --json`.
+status=$("$TS" status --json 2>/dev/null)
+prefs=$("$TS" debug prefs 2>/dev/null)
+backend=$(printf '%s' "$status" | python3 -c 'import json,sys;print(json.load(sys.stdin).get("BackendState",""))' 2>/dev/null)
+if [ "$backend" = "Running" ]; then
+  dnsname=$(printf '%s' "$status" | python3 -c 'import json,sys;print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))' 2>/dev/null)
+  ok "BackendState Running (${dnsname:-no MagicDNS name})"
+else
+  bad "BackendState is '${backend:-unreadable}', not Running — 07-tailscale.sh prints the join command"
+fi
+
+# Nothing but the node itself: no DNS override, no routes in or out, no SSH
+# server. --accept-dns=false is the one that matters — the UDM is the LAN's
+# resolver and Tailscale must never rewrite /etc/resolv.conf.
+pref() { printf '%s' "$prefs" | python3 -c "import json,sys;p=json.load(sys.stdin);print($1)" 2>/dev/null; }
+if [ -z "$prefs" ]; then
+  bad "cannot read prefs from tailscaled — daemon down?"
+else
+  [ "$(pref 'p.get("CorpDNS")')" = "False" ] \
+    && ok "accept-dns off (CorpDNS=false)" || bad "accept-dns is ON — rejoin with --accept-dns=false"
+  [ "$(pref 'p.get("RouteAll")')" = "False" ] \
+    && ok "accept-routes off" || bad "accept-routes is ON"
+  # An exit node is advertised as 0.0.0.0/0 and ::/0 in AdvertiseRoutes, so an
+  # empty list rules out both subnet routes and exit-node advertisement.
+  [ "$(pref 'len(p.get("AdvertiseRoutes") or [])')" = "0" ] \
+    && ok "no routes advertised" || bad "routes advertised: $(pref 'p.get("AdvertiseRoutes")')"
+  [ -z "$(pref 'p.get("ExitNodeID") or p.get("ExitNodeIP") or ""')" ] \
+    && ok "no exit node in use" || bad "an exit node is in use"
+  [ "$(pref 'p.get("RunSSH")')" = "False" ] \
+    && ok "tailscale ssh off" || bad "tailscale ssh is ON"
+  [ "$(pref 'p.get("Hostname")')" = "router" ] \
+    && ok "hostname router" || bad "hostname is '$(pref 'p.get("Hostname")')', not router"
+fi
+
+if grep -q '100\.100\.100\.100' /etc/resolv.conf 2>/dev/null; then
+  bad "/etc/resolv.conf points at 100.100.100.100 — Tailscale rewrote the router's DNS"
+else
+  ok "/etc/resolv.conf untouched by Tailscale"
+fi
+ip link show tailscale0 >/dev/null 2>&1 && ok "tailscale0 interface exists (kernel TUN)" \
+  || bad "no tailscale0 interface — TUN unavailable or daemon not up"
+# tailscaled defaults to iptables and hooks its own chains at the top of
+# INPUT/FORWARD; UniFi's rules live below them. Absence means it chose
+# nftables or netfilter is off, which is worth knowing but not a failure.
+if iptables -S INPUT 2>/dev/null | grep -q -- '-j ts-input'; then
+  ok "ts-input/ts-forward hooked into iptables ahead of UniFi's chains"
+else
+  echo "  WARN  no ts-input chain in iptables INPUT — check 'journalctl -u tailscaled' for the netfilter mode"
+fi
 
 echo
 [ "$fail" -eq 0 ] && echo "ALL CHECKS PASSED" || echo "SOME CHECKS FAILED"

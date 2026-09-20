@@ -1,0 +1,36 @@
+# Restored to /etc/systemd/system/tailscaled.service by 07-tailscale.sh.
+#
+# Derived from the unit shipped in the static tarball (systemd/tailscaled.service
+# in tailscale_<version>_arm64.tgz), with every path moved into /data so a
+# firmware rebuild loses only this file:
+#   - binaries in /data/tailscale/bin instead of /usr/sbin
+#   - --state in /data/tailscale so the node identity survives; without this a
+#     rebuild would need a new auth key
+#   - no EnvironmentFile=/etc/default/tailscaled (it would be wiped too); the
+#     port is inline and there are no extra flags
+#   - no StateDirectory= (it would create an unused /var/lib/tailscale)
+#
+# The socket path is the tailscale CLI's Linux default, so `tailscale ...` works
+# without --socket. --tun=tailscale0 is the default too, stated so the interface
+# name verify.sh checks is not implicit.
+[Unit]
+Description=Tailscale node agent
+Documentation=https://tailscale.com/docs/
+Wants=network-pre.target
+After=network-pre.target
+RequiresMountsFor=/data/tailscale
+
+[Service]
+ExecStart=/data/tailscale/bin/tailscaled --state=/data/tailscale/tailscaled.state --socket=/var/run/tailscale/tailscaled.sock --port=41641 --tun=tailscale0
+ExecStopPost=/data/tailscale/bin/tailscaled --cleanup
+
+Restart=on-failure
+
+RuntimeDirectory=tailscale
+RuntimeDirectoryMode=0755
+CacheDirectory=tailscale
+CacheDirectoryMode=0750
+Type=notify
+
+[Install]
+WantedBy=multi-user.target
