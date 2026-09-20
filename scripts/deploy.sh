@@ -49,7 +49,7 @@ for f in "$REPO"/secrets/*.sops; do
 done
 
 echo "==> staging /data on $HOST"
-ssh "$HOST" 'install -d -m 0755 /data/wpa_supplicant/conf /data/wpa_supplicant/packages /data/wpa_supplicant/systemd /data/ssh /data/on_boot.d'
+ssh "$HOST" 'install -d -m 0755 /data/wpa_supplicant/conf /data/wpa_supplicant/packages /data/wpa_supplicant/systemd /data/ssh /data/tailscale /data/on_boot.d'
 
 # Certs + conf
 scp -q "$STAGE"/conf/* "$HOST:/data/wpa_supplicant/conf/"
@@ -68,14 +68,41 @@ scp -q "$REPO"/systemd/wpa_supplicant.service.d/override.conf \
 scp -q "$REPO"/ssh/udm_ed25519.pub "$HOST:/data/ssh/authorized_keys"
 ssh "$HOST" 'chmod 600 /data/ssh/authorized_keys'
 
+# Tailscale: the pinned tarball, its hash, and the unit file. 07-tailscale.sh
+# reads the version from the tarball's filename, so exactly one may be staged;
+# anything else there (tailscaled.state, bin/) is the box's and is left alone.
+# The tarball is 34 MB, so it is only sent when the box does not already hold
+# a matching copy.
+tarball="$(basename "$REPO"/packages/tailscale_*_arm64.tgz)"
+tarball_sum="$(grep " ${tarball}\$" "$REPO/packages/SHA256SUMS" | cut -d' ' -f1 || true)"
+[ -n "$tarball_sum" ] || { echo "ERROR: ${tarball} has no entry in packages/SHA256SUMS" >&2; exit 1; }
+printf '%s  %s\n' "$tarball_sum" "$REPO/packages/${tarball}" | shasum -a 256 -c --status || {
+  echo "ERROR: packages/${tarball} does not match packages/SHA256SUMS" >&2; exit 1; }
+if ! printf '%s  /data/tailscale/%s\n' "$tarball_sum" "$tarball" | ssh "$HOST" 'sha256sum -c --status'; then
+  echo "    sending ${tarball}"
+  scp -q "$REPO/packages/${tarball}" "$HOST:/data/tailscale/${tarball}"
+fi
+printf '%s\n' "$tarball" | ssh "$HOST" 'keep=$(cat); find /data/tailscale -maxdepth 1 -name "tailscale_*_arm64.tgz" ! -name "$keep" -delete'
+scp -q "$REPO"/packages/SHA256SUMS "$HOST:/data/tailscale/SHA256SUMS"
+scp -q "$REPO"/systemd/tailscaled.service "$HOST:/data/tailscale/tailscaled.service"
+
+# The box once ran the community tailscale-udm package, which also used
+# /data/tailscale. Its manage.sh and tailscale-env are inert under this
+# layout, but say so rather than leave the captain wondering which one is live.
+ssh "$HOST" 'for f in /data/tailscale/manage.sh /data/tailscale/tailscale-env; do
+  [ -e "$f" ] && echo "    WARN  $f is a tailscale-udm leftover; 07-tailscale.sh does not use it"
+done; true'
+
 # Boot scripts
 scp -q "$REPO"/on_boot.d/*.sh "$HOST:/data/on_boot.d/"
 ssh "$HOST" 'chmod 755 /data/on_boot.d/*.sh'
 
 echo "==> staged. contents:"
-ssh "$HOST" 'find /data/wpa_supplicant /data/ssh /data/on_boot.d -type f | sort'
+ssh "$HOST" 'find /data/wpa_supplicant /data/ssh /data/tailscale /data/on_boot.d -type f | sort'
 
 echo
 echo "Done. Run scripts/verify.sh to confirm health, or"
 echo "  ssh $HOST systemctl restart unifi-on-boot"
 echo "to exercise the restore path without rebooting."
+echo "First Tailscale deploy: 07-tailscale.sh prints the one-time join command;"
+echo "  see README, Tailscale."

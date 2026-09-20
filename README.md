@@ -12,8 +12,8 @@ for over a year, which in turn meant missing security fixes.
 
 Now the box restores itself from `/data` on boot, and upgrades are hands-off.
 
-This repo owns the OS layer: UniFi OS, the supplicant, the boot scripts, and
-the upgrade runbook. The Network application's configuration (networks,
+This repo owns the OS layer: UniFi OS, the supplicant, Tailscale, the boot
+scripts, and the upgrade runbook. The Network application's configuration (networks,
 firewall, WLANs) is owned by [jcwearn/unifi-infra](https://github.com/jcwearn/unifi-infra)
 through the API.
 
@@ -34,6 +34,7 @@ through the API.
 | Debian base | 11 bullseye |
 | wpasupplicant | 2:2.9.0-21+deb11u3 |
 | unifi-on-boot | 1.1.3 |
+| Tailscale | 1.102.4 (static arm64 build, manual bump — see [Tailscale](#tailscale)) |
 
 ## How the self-heal works
 
@@ -45,10 +46,13 @@ overlay, a backup `.deb` in `/data/unifi-on-boot/`, and registration with
 |---|---|
 | `05-ssh-keys.sh` | `/root/.ssh/authorized_keys` from `/data/ssh/` |
 | `06-wpa-supplicant.sh` | package (offline `dpkg -i`), certs, conf, systemd drop-in, enable symlink |
+| `07-tailscale.sh` | binaries from the staged tarball (hash-checked), `tailscaled.service`, PATH symlink, enable + start; node identity already in `/data` |
 
 SSH keys go first so a supplicant failure still leaves you able to log in and
-debug. Both are no-ops on an ordinary reboot — every step is guarded, and
-re-running against a converged system leaves the supplicant PID unchanged.
+debug. Tailscale goes last: it needs WAN, WAN does not need it, and nothing
+about the tailnet may delay 802.1X. All three are no-ops on an ordinary reboot
+— every step is guarded, and re-running against a converged system leaves the
+supplicant PID unchanged.
 
 ### The configuration that actually matters
 
@@ -78,7 +82,7 @@ paths to the full extraction-tool names.
 
 ```bash
 scripts/deploy.sh [host]    # decrypt secrets, stage /data, install boot scripts
-scripts/verify.sh [host]    # 16-point health check, exit 0 = all good
+scripts/verify.sh [host]    # health check, exit 0 = all good
 scripts/discover.sh         # read-only audit; run via ssh, see below
 ```
 
@@ -134,6 +138,116 @@ live in `/data`. So if `/data` were lost entirely, that login still works. Do
 not disable it — it is the only recovery route that does not share a failure
 mode with everything else here.
 
+## Tailscale
+
+The router is a plain tailnet node named `router`, so `ssh router` works over
+MagicDNS from any device with Tailscale's DNS override on. It is nothing else:
+no subnet routes, no exit node, no accepted routes, no Tailscale SSH, and —
+the one that matters — `--accept-dns=false`, because the UDM is the LAN's
+resolver and Tailscale must never rewrite its `/etc/resolv.conf`. `verify.sh`
+asserts every one of those from the daemon's own prefs, plus the absence of
+`100.100.100.100` in `resolv.conf`.
+
+Layout, all under `/data/tailscale/` so a firmware rebuild loses nothing that
+matters:
+
+| Path | What |
+|---|---|
+| `tailscale_<version>_arm64.tgz` + `SHA256SUMS` | the official static build, pinned; staged by `deploy.sh` |
+| `bin/tailscale`, `bin/tailscaled` | extracted by `07-tailscale.sh` when missing or the wrong version |
+| `tailscaled.service` | the unit, copied to `/etc/systemd/system` on every boot that finds it gone or different |
+| `tailscaled.state` | the node identity; written by `tailscaled`, never by this repo |
+
+After a UniFi OS upgrade the unit file and the `/usr/local/bin/tailscale`
+symlink are the only casualties; the boot script puts them back, `tailscaled`
+reads its key from `/data`, and the node rejoins on its own. **No auth key is
+stored on the box or in this repo.**
+
+### The one-time join
+
+`07-tailscale.sh` never runs `tailscale up`. On a node that has not joined (or
+was logged out on purpose) it prints this and exits 0:
+
+```bash
+ssh udm
+tailscale up --accept-dns=false --accept-routes=false --advertise-routes= --ssh=false --hostname=router
+```
+
+Either append `--auth-key=tskey-auth-...` or follow the login URL it prints.
+Flags are not persisted between `tailscale up` runs, so if you ever re-run it,
+pass all of them again. Then `scripts/verify.sh` from the Mac, and
+`ssh router` from anywhere with Tailscale on.
+
+### What Tailscale changes on the box, and what is not yet verified
+
+Relied upon, from the 1.102.4 source:
+
+- Tailscale detects Ubiquiti hardware by `/usr/bin/ubnt-device-info` and takes
+  a UBNT-specific policy-routing path: a single `ip rule` at pref 5270
+  (`not fwmark 0x80000/0xff0000 lookup 52`) rather than the four rules it
+  installs elsewhere. Table 52 holds only tailnet routes.
+- With the default `--netfilter-mode=on` and `iptables` present, it creates
+  chains `ts-input` and `ts-forward` in `filter` and `ts-postrouting` in
+  `nat`, and inserts a jump to each at position 1 of `INPUT`, `FORWARD` and
+  `POSTROUTING`. `ts-input` accepts traffic arriving on `tailscale0`;
+  `ts-forward` marks and accepts forwarded traffic in and out of `tailscale0`;
+  nothing is forwarded because no routes are advertised or accepted.
+  UniFi's `UBIOS_*` chains stay below, untouched.
+- Tailscale's WireGuard traffic leaves on `eth8`. IPS inspects only the six
+  `br*` bridges, and the Peer-to-Peer category was already unchecked in the
+  snapshot ("2 of 3"), which is what
+  [Tailscale's firewall doc](https://tailscale.com/docs/integrations/firewalls)
+  asks of UniFi threat detection.
+- The community [tailscale-udm](https://github.com/SierraSoftworks/tailscale-udm)
+  package runs kernel-TUN Tailscale on this hardware family with the same
+  `--state /data/tailscale/tailscaled.state` layout. It is not used here
+  because it installs through `apt`, which is broken on this box, and reinstalls
+  from the internet on every firmware update; this repo installs offline from
+  the pinned tarball instead.
+
+Not verifiable until the first `deploy.sh` + `verify.sh` run on the box:
+
+- that `/dev/net/tun` is usable so `tailscale0` comes up in kernel mode rather
+  than needing `--tun=userspace-networking` (`verify.sh` checks the interface);
+- that the box's `fwmark` use does not collide with Tailscale's `0x80000` /
+  `0x40000` in mask `0xff0000` (`verify.sh` prints whether the `ts-*` chains
+  hooked in; `journalctl -u tailscaled` shows the netfilter mode it chose);
+- whether peers connect direct or through DERP. Nothing opens UDP 41641 inbound
+  on WAN; hole punching from the router's own outbound traffic usually suffices
+  because the UDM binds the public address directly. If `tailscale status`
+  shows `relay` for peers you care about, a WAN-in rule for UDP 41641 belongs in
+  [unifi-infra](https://github.com/jcwearn/unifi-infra), not here.
+
+### Upgrading Tailscale
+
+Renovate cannot bump this: the shared preset only regex-matches `.tf` and
+workflow files, and a version-only bump would leave the committed tarball and
+its hash stale. By hand:
+
+```bash
+v=1.103.0   # from https://pkgs.tailscale.com/stable/
+curl -fsSLO "https://pkgs.tailscale.com/stable/tailscale_${v}_arm64.tgz"
+curl -fsSL  "https://pkgs.tailscale.com/stable/tailscale_${v}_arm64.tgz.sha256"   # compare
+git rm packages/tailscale_*_arm64.tgz && mv "tailscale_${v}_arm64.tgz" packages/
+# replace the tailscale line in packages/SHA256SUMS, bump the version above, then:
+scripts/deploy.sh && ssh udm 'systemctl restart unifi-on-boot' && scripts/verify.sh
+```
+
+`deploy.sh` sends the 34 MB tarball only when the box does not already hold a
+matching copy, and removes any other `tailscale_*_arm64.tgz` there, because the
+boot script reads the pinned version from the filename.
+
+### Rollback
+
+```bash
+ssh udm 'tailscale logout; systemctl disable --now tailscaled.service'
+```
+
+then remove the machine in the admin console. The boot script stays installed
+and harmless: on the next boot it restores the unit, starts the daemon, sees
+`NeedsLogin`, prints the join command and exits 0. To remove it entirely, delete
+`on_boot.d/07-tailscale.sh` and `/data/tailscale/` and re-run `deploy.sh`.
+
 ## Restore from scratch
 
 Bare UDM to working bypass, assuming `/data` is empty:
@@ -143,8 +257,12 @@ Bare UDM to working bypass, assuming `/data` is empty:
 3. `scp packages/unifi-on-boot_*.deb udm:/tmp/ && ssh udm 'dpkg -i /tmp/unifi-on-boot_*.deb'`
 4. `scripts/deploy.sh udm`
 5. `ssh udm 'systemctl restart unifi-on-boot'`
-6. `scripts/verify.sh udm` → expect ALL CHECKS PASSED
+6. `scripts/verify.sh udm` → expect the Tailscale checks to fail with
+   `NeedsLogin`; everything else passes.
 7. Disconnect the AT&T gateway; WAN should hold.
+8. The node identity was in `/data`, so it is gone too: do the
+   [one-time join](#the-one-time-join) again by hand, then `scripts/verify.sh`
+   → expect ALL CHECKS PASSED.
 
 ## Upgrade procedure
 
@@ -159,7 +277,10 @@ Bare UDM to working bypass, assuming `/data` is empty:
 5. **Immediately re-run `scripts/verify.sh`.** The critical line is the base
    check: the cached `.deb` is bullseye-era and `libssl1.1` does not exist on
    bookworm. If UniFi OS ever rebases, refresh `packages/` **while the gateway
-   is still reachable**, before trusting the cache.
+   is still reachable**, before trusting the cache. The same run verifies
+   `tailscaled` after the reboot: unit restored, `Running`, identity still in
+   `/data`. If it reports `NeedsLogin`, `/data/tailscale/tailscaled.state` did
+   not survive and the join is repeated by hand.
 6. Re-enable IPS from the checklist and diff against the snapshot.
 7. Confirm Encrypted DNS is still committed — see [`docs/dns-config.md`](docs/dns-config.md).
    `verify.sh` checks this, but it reverts on any re-provision, not only upgrades.
@@ -174,6 +295,9 @@ application updates are applied by hand; auto-update is off for all three.
 Network has moved 10.4.57 → 10.5.67 → 10.6.101 → 10.6.106 between 2026-08-08
 and 2026-09-15, so "Current state" above reflects the box as last checked, not
 a pin.
+
+Tailscale is the one row that *is* a pin, and a manual one — see
+[Upgrading Tailscale](#upgrading-tailscale).
 
 ## Known open items
 
@@ -203,10 +327,18 @@ was archived by Debian and 404s. It breaks apt generally but affects nothing
 here — the restore path uses `dpkg -i` against the local cache and never touches
 apt.
 
-## Future option, not implemented
+## Future options, not implemented
 
-Move the supplicant off the UDM entirely — a Raspberry Pi or mini PC between the
-ONT and the UDM running wpa_supplicant, or [eap_proxy](https://github.com/kangtastic/eap_proxy).
+**A fallback subnet router.** The router could advertise the LAN routes so the
+tailnet can reach the LAN when the k3s subnet router is down, independent of
+the cluster — see `docs/plans/dns-remote-access-resilience.md` in
+[k3s-cluster](https://github.com/jcwearn/k3s-cluster). Deliberately not done
+here: the join above advertises nothing, and `verify.sh` will fail if that
+changes without this section changing with it.
+
+**Move the supplicant off the UDM entirely** — a Raspberry Pi or mini PC
+between the ONT and the UDM running wpa_supplicant, or
+[eap_proxy](https://github.com/kangtastic/eap_proxy).
 UniFi firmware then becomes irrelevant to WAN connectivity, at the cost of one
 more device in the critical path. Less compelling now that upgrades are proven
 hands-off, but worth revisiting if Ubiquiti's release cadence gets rougher.
@@ -214,5 +346,9 @@ hands-off, but worth revisiting if Ubiquiti's release cadence gets rougher.
 ## References
 
 - [unifi-on-boot](https://github.com/unredacted/unifi-on-boot)
+- [tailscale-udm](https://github.com/SierraSoftworks/tailscale-udm) — the
+  community package; the `/data/tailscale` state layout is borrowed from it
+- [Tailscale static binaries](https://pkgs.tailscale.com/stable/) and the
+  [`tailscale up` flags](https://tailscale.com/kb/1241/tailscale-up)
 - [Unifi-gateway-wpa-supplicant](https://github.com/evie-lau/Unifi-gateway-wpa-supplicant)
 - [AT&T cert extraction (BGW210/BGW320)](https://github.com/0x888e/certs)
