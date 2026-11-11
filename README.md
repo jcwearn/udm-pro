@@ -23,16 +23,17 @@ through the API.
 |---|---|
 | Destructive test — package, certs, conf, drop-in, enable symlink and `authorized_keys` all deleted, then rebooted | Self-healed, `CTRL-EVENT-EAP-SUCCESS`, no gateway needed |
 | Real UniFi OS 4.3.6 → 5.1.26 upgrade | Firmware wiped the supplicant, box rebuilt it, ~49s from boot script to authenticated WAN |
+| Real UniFi OS 5.1.33 → 6.0.17 upgrade (2026-11-11) | **Failed** — base rebased bullseye → trixie, cached `.deb` needed `libssl1.1`. Recovered manually; see [Trixie rebase](#unifi-os-60-trixie-rebase) |
 
 ## Current state
 
 | Component | Version |
 |---|---|
-| UniFi OS | 5.1.33 (`UDMPRO.al324.v5.1.33.44ce47b.260909.0025`) |
-| Network | 10.6.106 |
-| Protect | 7.2.105 |
-| Debian base | 11 bullseye |
-| wpasupplicant | 2:2.9.0-21+deb11u3 |
+| UniFi OS | 6.0.17 (`UDMPRO.al324.v6.0.17.7bcad58.261103.1126`) |
+| Network | 10.6.109 |
+| Protect | reinstalling after upgrade (was 7.2.105) |
+| Debian base | 13 trixie |
+| wpasupplicant | 2:2.10-24 |
 | unifi-on-boot | 1.1.3 |
 
 ## How the self-heal works
@@ -73,6 +74,30 @@ the process command line rather than unit state.
 
 Cert filenames are load-bearing too — `wpa_supplicant.conf` hardcodes absolute
 paths to the full extraction-tool names.
+
+### UniFi OS 6.0 trixie rebase
+
+UniFi OS 6.0 moved the base from Debian 11 (bullseye) to 13 (trixie). The cached
+bullseye `wpasupplicant` linked `libssl.so.1.1`, which trixie does not ship, so
+the boot script's `dpkg -i` failed and WAN stayed down. The cached packages are
+now trixie builds (`wpasupplicant` 2.10-24, `libpcsclite1`, `adduser`).
+
+Trixie's OpenSSL 3 also rejects the AT&T client cert — 1024-bit RSA, SHA-1
+signed — at its default security level:
+
+```
+SSL_use_certificate_file failed error:0A00018E:SSL routines::ca md too weak
+TLS: Failed to set TLS connection parameters
+CTRL-REQ-PASSPHRASE-0:Private key passphrase needed   <- misleading, key has none
+```
+
+`wpa_supplicant.conf` therefore carries a **global, unquoted**
+`openssl_ciphers=DEFAULT@SECLEVEL=0` on its first line. What did not work:
+the same option only inside the `network` block (applied after the cert loads),
+an `OPENSSL_CONF` with `CipherString = DEFAULT@SECLEVEL=0` (overridden by
+wpa_supplicant's own context setup), and the global option *quoted* (the global
+parser keeps the quotes and OpenSSL rejects the string). `verify.sh` checks for
+the exact line.
 
 ## Usage
 
@@ -157,9 +182,10 @@ Bare UDM to working bypass, assuming `/data` is empty:
 3. Disable IPS — see [`docs/ips-config.md`](docs/ips-config.md).
 4. Upgrade UniFi OS.
 5. **Immediately re-run `scripts/verify.sh`.** The critical line is the base
-   check: the cached `.deb` is bullseye-era and `libssl1.1` does not exist on
-   bookworm. If UniFi OS ever rebases, refresh `packages/` **while the gateway
-   is still reachable**, before trusting the cache.
+   check: the cached `.deb`s are trixie builds. Before a **major** UniFi OS
+   version, check the release notes for a Debian rebase — 6.0 did one and took
+   WAN down. If it rebases, stage matching `packages/` before upgrading, and keep
+   the AT&T gateway at hand.
 6. Re-enable IPS from the checklist and diff against the snapshot.
 7. Confirm Encrypted DNS is still committed — see [`docs/dns-config.md`](docs/dns-config.md).
    `verify.sh` checks this, but it reverts on any re-provision, not only upgrades.
@@ -197,11 +223,6 @@ running while the controller's `doh` setting still read `state: off` with an
 empty `custom_servers`, so the reconcile was right to remove it. The stamp was
 never at fault. Because the resolver running proves nothing, `verify.sh` asserts
 on the controller's record; see [`docs/dns-config.md`](docs/dns-config.md).
-
-**`apt-get update` exits 100.** `bullseye-backports` in `/etc/apt/sources.list`
-was archived by Debian and 404s. It breaks apt generally but affects nothing
-here — the restore path uses `dpkg -i` against the local cache and never touches
-apt.
 
 ## Future option, not implemented
 

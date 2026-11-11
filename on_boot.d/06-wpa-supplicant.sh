@@ -29,14 +29,16 @@ changed=0
 log() { echo "$(basename "$0" .sh): $*"; }
 
 # --- 1. Package -------------------------------------------------------------
-# Order is explicit: libpcsclite1 is a dependency of wpasupplicant, and
-# installing them in the wrong order leaves dpkg in a half-configured state.
-# The other nine dependencies ship with the UniFi OS base image; libssl1.1 is
-# the fragile one (bullseye-only, gone in bookworm) — if UniFi OS ever rebases,
-# this install fails and scripts/discover.sh will show it.
+# Order is explicit: dependencies first, then wpasupplicant, or dpkg is left
+# half-configured. The cached packages are Debian 13 (trixie), matching UniFi OS
+# 6.x; the rest of the dependency set (libssl3t64, libnl-*, libreadline8t64,
+# libdbus) ships with the base image. If UniFi OS rebases again, this install
+# fails — scripts/verify.sh's codename check is the tripwire.
 if ! command -v wpa_supplicant >/dev/null 2>&1; then
   log "wpa_supplicant missing — reinstalling from cached packages"
-  dpkg -i "${DATA}"/packages/libpcsclite1_*.deb || log "WARNING: libpcsclite1 install failed"
+  deps="${DATA}/packages/libpcsclite1_*.deb"
+  dpkg -s adduser >/dev/null 2>&1 || deps="$deps ${DATA}/packages/adduser_*.deb"
+  dpkg -i $deps || log "WARNING: dependency install failed"
   dpkg -i "${DATA}"/packages/wpasupplicant_*.deb || log "WARNING: wpasupplicant install failed"
   changed=1
 fi

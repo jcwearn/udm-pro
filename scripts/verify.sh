@@ -71,16 +71,22 @@ ls /data/wpa_supplicant/packages/libpcsclite1_*.deb >/dev/null 2>&1 \
   && ok "cached libpcsclite1 .deb present" || bad "cached libpcsclite1 .deb MISSING"
 
 echo "== offline-install viability =="
-# libssl1.1 is the tripwire: bullseye-only, removed in bookworm. If UniFi OS
-# rebases, the cached bullseye .deb stops installing and the self-heal breaks.
+# The cached .debs are trixie builds. If UniFi OS rebases again (as 6.0 did,
+# bullseye -> trixie), they stop installing and the self-heal breaks.
 . /etc/os-release
-if [ "${VERSION_CODENAME:-}" = "bullseye" ]; then
-  ok "base is bullseye — cached .deb matches"
+if [ "${VERSION_CODENAME:-}" = "trixie" ]; then
+  ok "base is trixie — cached .deb matches"
 else
-  bad "base is ${VERSION_CODENAME:-unknown}, NOT bullseye — refresh packages/ before trusting the cache"
+  bad "base is ${VERSION_CODENAME:-unknown}, NOT trixie — refresh packages/ before trusting the cache"
 fi
-dpkg-query -W -f='${Status}' libssl1.1 2>/dev/null | grep -q "install ok installed" \
-  && ok "libssl1.1 present" || bad "libssl1.1 MISSING — wpasupplicant cannot install offline"
+dpkg-query -W -f='${Status}' libssl3t64 2>/dev/null | grep -q "install ok installed" \
+  && ok "libssl3t64 present" || bad "libssl3t64 MISSING — wpasupplicant cannot install offline"
+
+# OpenSSL 3 rejects the AT&T client cert (1024-bit RSA, SHA-1) at the default
+# security level: "ca md too weak". The global (unquoted) openssl_ciphers line
+# is what fixes it; without it EAP fails while the service still reads active.
+grep -q '^openssl_ciphers=DEFAULT@SECLEVEL=0$' /data/wpa_supplicant/conf/wpa_supplicant.conf 2>/dev/null \
+  && ok "global openssl_ciphers SECLEVEL=0 in conf" || bad "global openssl_ciphers SECLEVEL=0 MISSING — EAP-TLS will fail"
 
 echo "== encrypted DNS =="
 # The gateway will happily run the resolver while the controller has no record
