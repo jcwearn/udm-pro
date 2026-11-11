@@ -1,6 +1,6 @@
 # Progress: UDM Pro Upgrade Readiness and wpa_supplicant Persistence
 
-## Current Status: In Progress
+## Current Status: Complete
 
 | Phase | Status | Updated | Notes |
 |-------|--------|---------|-------|
@@ -12,7 +12,7 @@
 | 6. Destructive validation | Complete | 2026-08-08 | Full wipe + reboot, self-healed, `CTRL-EVENT-EAP-SUCCESS` |
 | 7. Firmware upgrade | Complete | 2026-08-08 | 4.3.6 → 5.1.26; supplicant wiped and rebuilt unaided. Protect → 7.1.87 |
 | 8. Documentation | Complete | 2026-08-08 | README runbook, IPS restore checklist |
-| 9. UniFi OS 6.0 trixie recovery | In Progress | 2026-11-11 | 5.1.33 → 6.0.17 rebased to trixie; self-heal failed, WAN restored manually. Packages + conf updated; needs a reboot test |
+| 9. UniFi OS 6.0 trixie recovery | Complete | 2026-11-11 | 5.1.33 → 6.0.17 rebased to trixie; self-heal failed, WAN restored manually. Packages + conf updated; reboot test passed |
 
 ## What discovery changed
 
@@ -83,5 +83,10 @@ from the LAN: installed trixie `wpasupplicant` 2.10-24, then added a global
 rebase". `/data/wpa_supplicant/packages/` on the box already holds the trixie
 debs; the bullseye ones are kept in `packages.bullseye/` beside it.
 
-Remaining: one reboot to prove the self-heal on trixie (`verify.sh` should pass
-afterwards), and confirm Protect finishes reinstalling.
+Reboot test passed: `CTRL-EVENT-EAP-SUCCESS` at boot, boot scripts converged
+with no changes, all supplicant/WAN checks green. Protect reinstalled as 7.3.74.
+
+Open: `verify.sh`'s encrypted-DNS check fails because the controller now
+reports `doh` `state: "custom"` (Network 10.6.109) rather than `"on"`. The
+resolver is running; likely a schema change, not a revert — confirm and adjust
+the check.

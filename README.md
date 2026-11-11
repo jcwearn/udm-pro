@@ -31,7 +31,7 @@ through the API.
 |---|---|
 | UniFi OS | 6.0.17 (`UDMPRO.al324.v6.0.17.7bcad58.261103.1126`) |
 | Network | 10.6.109 |
-| Protect | reinstalling after upgrade (was 7.2.105) |
+| Protect | 7.3.74 |
 | Debian base | 13 trixie |
 | wpasupplicant | 2:2.10-24 |
 | unifi-on-boot | 1.1.3 |
