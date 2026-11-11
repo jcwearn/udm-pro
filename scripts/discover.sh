@@ -17,12 +17,11 @@ echo; echo "===== 4. INSTALLED PACKAGES ====="
 dpkg -l | grep -iE 'wpa|pcsc' || echo "(none matched)"
 
 echo; echo "===== 4b. OFFLINE-INSTALL DEPENDENCY CHECK (critical) ====="
-# wpasupplicant 2:2.9.0-21+deb11u3 needs all of these. Only libpcsclite1 is
-# cached alongside it; the rest must already exist on the base system.
-# libssl1.1 is the tripwire: it exists on bullseye but was REMOVED in bookworm.
-# If UniFi OS 5.x moves to bookworm, the cached .deb becomes uninstallable.
+# wpasupplicant 2:2.10-24 (trixie) needs all of these. libpcsclite1 and adduser
+# are cached alongside it; the rest must already exist on the base system.
+# The t64 names are trixie-specific: if UniFi OS rebases again, expect MISSING.
 for dep in libc6 libdbus-1-3 libnl-3-200 libnl-genl-3-200 libnl-route-3-200 \
-           libpcsclite1 libreadline8 libssl1.1 lsb-base adduser; do
+           libpcsclite1 libreadline8t64 libssl3t64 adduser; do
   ver=$(dpkg-query -W -f='${Version}' "$dep" 2>/dev/null)
   if [ -n "$ver" ]; then
     printf '  PRESENT  %-20s %s\n' "$dep" "$ver"

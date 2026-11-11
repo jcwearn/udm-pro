@@ -56,8 +56,12 @@ scp -q "$STAGE"/conf/* "$HOST:/data/wpa_supplicant/conf/"
 ssh "$HOST" 'chmod 640 /data/wpa_supplicant/conf/*'
 
 # Cached packages. unifi-on-boot keeps its own copy in /data/unifi-on-boot,
-# so only the supplicant's packages belong here.
+# so only the supplicant's packages belong here. Clear stale versions first:
+# the boot script globs wpasupplicant_*.deb, and a leftover 2.9 sorts after
+# 2.10 and would be installed last, downgrading onto the wrong base.
+ssh "$HOST" 'rm -f /data/wpa_supplicant/packages/*.deb'
 scp -q "$REPO"/packages/wpasupplicant_*.deb "$REPO"/packages/libpcsclite1_*.deb \
+       "$REPO"/packages/adduser_*.deb \
        "$HOST:/data/wpa_supplicant/packages/"
 
 # systemd drop-in
